@@ -31,6 +31,7 @@
 #include "verilated.h"
 #include <queue>
 
+#define RX_OK_START    (1)
 #define RX_OK          (0)
 #define RX_EMPTY       (-1)
 #define RX_PARITY_ERR  (-2)
@@ -45,10 +46,13 @@ class UartIF
         // Methods
         void        Eval(vluint8_t bclk);
         vluint64_t  SetUartConfig(const char *uart_cfg, vluint32_t baud, short inter_byte);
+        void        SetRxTimeout(vluint32_t timeout_us);
         void        ConnectTx(vluint8_t *sig);
         void        ConnectRx(vluint8_t *sig);
         void        PutTxChar(vluint16_t data);
         void        PutTxString(const char *str);
+        bool        IsRxEmpty(void);
+        int         RxSize(void);
         int         GetRxChar(vluint16_t &data);
     private:
         // Private methods
@@ -85,8 +89,9 @@ class UartIF
         const vluint16_t DATA_MSK_9B   =  0x01FF; // 16'b0000000111111111
         const vluint16_t TX_DATA_EMPTY =  0x0000;
         const vluint16_t RX_DATA_EMPTY =  0xFFFF;
-        const vluint16_t RX_STOP_OK    =  0x8000; // 16'b1000000000000000
-        const vluint16_t RX_PARITY_OK  =  0x4000; // 16'b0100000000000000
+        const vluint16_t RX_START      =  0x8000; // 16'b1000000000000000
+        const vluint16_t RX_STOP_OK    =  0x4000; // 16'b0100000000000000
+        const vluint16_t RX_PARITY_OK  =  0x2000; // 16'b0010000000000000
         
         const vluint32_t UART_BAUD_MIN  = 1200;
         const vluint32_t UART_BAUD_DFT  = 115200;
@@ -123,6 +128,12 @@ class UartIF
         vluint8_t  *tx_sig;
         // Uart RX signal
         vluint8_t  *rx_sig;
+        // RX time-out management
+        vluint32_t  rx_timeout_val;  // RX timeout value (in cycles)
+        vluint32_t  rx_timeout_cnt;  // RX timeout counter (in cycles)
+        bool        rx_timeout;
+        // UART internal loopback signal
+        vluint8_t   loop_back_sig;
         // Previous baud clock value
         vluint8_t   prev_bclk;
         // Previous RX pin value

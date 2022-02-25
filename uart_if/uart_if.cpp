@@ -28,36 +28,39 @@
 #include "uart_if.h"
 #include <stdlib.h>
 #include <stdio.h>
-#include <time.h>
 
 // Constructor
 UartIF::UartIF()
 {
     // No UART connection
-    prev_bclk    = 0;
-    prev_rx      = 1;
+    loop_back_sig  = 1;
+    prev_bclk      = 0;
+    prev_rx        = 1;
     
     // Initialize time variables
-    baud_clk_per = (vluint64_t)200000000000LL / UART_BAUD_DFT;
+    baud_clk_per   = (vluint64_t)200000000000LL / UART_BAUD_DFT;
+    rx_timeout_val = (vluint32_t)10000000 / UART_BAUD_DFT;
+    rx_timeout_cnt = (vluint32_t)0;
+    rx_timeout     = false;
     
     // Default UART configuration (8N1 @ 115200 bauds)
-    baud_rate    = UART_BAUD_DFT;
-    mode_9bit    = false;         // 8
-    parity       = PARITY_NONE;   // N
-    stop_bits    = STOP_MSK_8N1;  // 1
-    rx_bit_msk   = RXD_MSK_8N1;
-    data_msk     = DATA_MSK_8B;
-    tx_ib_dly    = 3;             // 3/5 bit delay
+    baud_rate      = UART_BAUD_DFT;
+    mode_9bit      = false;         // 8
+    parity         = PARITY_NONE;   // N
+    stop_bits      = STOP_MSK_8N1;  // 1
+    rx_bit_msk     = RXD_MSK_8N1;
+    data_msk       = DATA_MSK_8B;
+    tx_ib_dly      = 3;             // 3/5 bit delay
     
     // TX state
-    tx_data      = TX_DATA_EMPTY;
-    tx_cycle     = -3;
-    tx_sig       = NULL;
+    tx_data        = TX_DATA_EMPTY;
+    tx_cycle       = -3;
+    tx_sig         = &loop_back_sig;
     
     // RX state
-    rx_data      = RX_DATA_EMPTY;
-    rx_cycle     = 0;
-    rx_sig       = NULL;
+    rx_data        = RX_DATA_EMPTY;
+    rx_cycle       = 0;
+    rx_sig         = &loop_back_sig;
 }
 
 // Destructor
@@ -156,6 +159,19 @@ vluint64_t UartIF::SetUartConfig(const char *uart_cfg, vluint32_t baud, short in
     return baud_clk_per;
 }
 
+// Set RX time-out
+void UartIF::SetRxTimeout(vluint32_t timeout_us)
+{
+    if (timeout_us < ((vluint32_t)1000000 / baud_rate))
+    {
+        printf("UART : RX timeout too low !!\n");
+        fflush(stdout);
+        return;
+    }
+    // Timeout delays (us -> cycles)
+    rx_timeout_val = (vluint32_t)(((vluint64_t)1000000LL * timeout_us) / baud_clk_per);
+}
+
 // Connect the UART TX to a signal
 void UartIF::ConnectTx(vluint8_t *sig)
 {
@@ -185,6 +201,18 @@ void UartIF::PutTxString(const char *str)
     while (*str) tx_buf.push((vluint16_t)*str++);
 }
 
+// Check if RX buffer is empty
+bool UartIF::IsRxEmpty(void)
+{
+    return rx_buf.empty();
+}
+
+// Number of bytes in RX buffer
+int  UartIF::RxSize(void)
+{
+    return rx_buf.size();
+}
+
 // Read one data from the RX buffer
 int  UartIF::GetRxChar(vluint16_t &data)
 {
@@ -198,6 +226,7 @@ int  UartIF::GetRxChar(vluint16_t &data)
         vluint16_t tmp;
         
         tmp = rx_buf.front();
+        //printf("%04X ", tmp);
         rx_buf.pop();
         data = tmp & data_msk;
         
@@ -205,7 +234,14 @@ int  UartIF::GetRxChar(vluint16_t &data)
         {
             if (tmp & RX_PARITY_OK)
             {
-                return RX_OK;
+                if (tmp & RX_START)
+                {
+                    return RX_OK_START;
+                }
+                else
+                {
+                    return RX_OK;
+                }
             }
             else
             {
@@ -289,20 +325,18 @@ void UartIF::Eval(vluint8_t bclk)
                 // Shift a zero if RX pin = 0
                 if (*rx_sig == 0) rx_data &= rx_bit_msk;
             }
-            // Count cycles
-            if (rx_cycle == 5)
+            // Full byte received ?
+            if (rx_data & 1)
             {
-                rx_cycle = rx_data & 1;
+                // No, count cycles
+                rx_cycle = (rx_cycle == 5) ? 1 : rx_cycle + 1;
             }
             else
             {
-                rx_cycle++;
-            }
-            
-            // Check if START bit is in bit #0
-            if (rx_cycle == 0)
-            {
                 vluint16_t tmp;
+                
+                // Yes, decode byte
+                rx_cycle = 0;
                 
                 // Drop START bit
                 rx_data >>= 1;
@@ -318,6 +352,12 @@ void UartIF::Eval(vluint8_t bclk)
                 }
                 // Check stop bits
                 if ((rx_data & stop_bits) == stop_bits) tmp |= RX_STOP_OK;
+                // Mark start of message
+                if (rx_timeout)
+                {
+                    tmp |= RX_START;
+                    rx_timeout = false;
+                }
                 // Extract data bits
                 tmp |= rx_data & data_msk;
                 // Store result
@@ -332,8 +372,19 @@ void UartIF::Eval(vluint8_t bclk)
             // RX falling edge (START bit)
             if (prev_rx && !(*rx_sig))
             {
+                // Clear the time-out counter
+                rx_timeout_cnt = 0;
                 // Activate RX state machine
                 rx_cycle = 1;
+            }
+            else
+            {
+                // Time-out counter management
+                if (!rx_timeout)
+                {
+                    rx_timeout_cnt ++;
+                    rx_timeout = (rx_timeout_cnt >= rx_timeout_val);
+                }
             }
         }
         // Previous RX value
