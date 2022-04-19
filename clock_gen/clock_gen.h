@@ -22,13 +22,14 @@
 //  - Arbitrary clocks' periods and phase
 //  - Clocks can be started/stopped
 //  - Clocks can be directly connected to a signal
-//  - Event list management (experimental)
+//  - Event list management
 //  - Simulation progress in us when quiet mode is off
 
 #ifndef _CLOCK_GEN_H_
 #define _CLOCK_GEN_H_
 
 #include "verilated.h"
+#include <queue>
 
 // Helper macros for timestamps
 #define TS_NS(ts) (1000LL*ts)
@@ -40,23 +41,24 @@ class ClockGen
 {
     public:
         // Constructor and destructor
-        ClockGen(int num_clk, int evt_depth);
+        ClockGen(int num_clk);
         ~ClockGen();
         // Methods
         void        AddEvent(vluint64_t stamp_ps, void (*cback)());
-        void        NewClock(int clk_idx, vluint64_t period_ps);
-        void        ConnectClock(int clk_idx, vluint8_t *sig);
-        void        StartClock(int clk_idx, vluint64_t stamp_ps);
-        void        StartClock(int clk_idx, vluint64_t phase_ps, vluint64_t stamp_ps);
-        void        StopClock(int clk_idx);
-        vluint8_t   GetClockStateDiv1(int clk_idx, vluint8_t phase); // phase : 0 - 1
-        vluint8_t   GetClockStateDiv2(int clk_idx, vluint8_t phase); // phase : 0 - 3
-        vluint8_t   GetClockStateDiv4(int clk_idx, vluint8_t phase); // phase : 0 - 7
-        vluint8_t   GetClockStateDiv8(int clk_idx, vluint8_t phase); // phase : 0 - 15
-        vluint8_t   GetClockStateDiv16(int clk_idx, vluint8_t phase); // phase : 0 - 31
-        vluint8_t   GetClockStateDiv32(int clk_idx, vluint8_t phase); // phase : 0 - 63
+        void        NewClock(int idx, vluint64_t period_ps);
+        void        ConnectClock(int idx, vluint8_t *sig);
+        void        StartClock(int idx, vluint64_t stamp_ps);
+        void        StartClock(int idx, vluint64_t phase_ps, vluint64_t stamp_ps);
+        void        StopClock(int idx);
+        vluint8_t   GetClockStateDiv1(int idx, vluint8_t phase); // phase : 0 - 1
+        vluint8_t   GetClockStateDiv2(int idx, vluint8_t phase); // phase : 0 - 3
+        vluint8_t   GetClockStateDiv4(int idx, vluint8_t phase); // phase : 0 - 7
+        vluint8_t   GetClockStateDiv8(int idx, vluint8_t phase); // phase : 0 - 15
+        vluint8_t   GetClockStateDiv16(int idx, vluint8_t phase); // phase : 0 - 31
+        vluint8_t   GetClockStateDiv32(int idx, vluint8_t phase); // phase : 0 - 63
         void        AdvanceClocks(vluint64_t &stamp_ps, bool quiet);
     private:
+        // Clock type
         typedef struct
         {
             vluint64_t clk_stamp_ps; // Clock's time stamps (in ps)
@@ -65,22 +67,45 @@ class ClockGen
             vluint8_t  clk_state;    // Clock's state (0 - 255)
             vluint8_t  clk_dummy;    // Dummy clock signal
             bool       clk_enable;   // Clock enabled
-        } vlclk_t;
+        } vl_clk_t;
+        
+        // Clock list type
+        typedef std::vector
+        <
+            vl_clk_t
+        > vl_clk_list_t;
+        
+        // Event type
         typedef struct
         {
             vluint64_t evt_stamp_ps; // Event's time stamps (in ps)
             void     (*evt_cback)(); // Event's call back function
-        } vlevt_t;
-        int         num_clock;       // Number of clocks
-        int         event_depth;     // Event queue depth
-        int         event_stored;    // Number of events stored
-        int         event_wr_idx;    // Event queue write index
-        int         event_rd_idx;    // Event queue read index
-        vluint64_t  max_step_ps;     // Maximum simulation step (in ps)
-        vluint64_t  next_stamp_ps;   // Next time stamp (in ps)
-        vlclk_t    *clk_map;         // Created clocks
-        vlevt_t    *evt_buf;         // Event queue
-        vlevt_t    *evt_ptr;         // Current event
+        } vl_evt_t;
+        
+        // Custom compare function for std::priority_queue
+        class vl_evt_compare
+        {
+            public:
+                bool operator() (const vl_evt_t &lhs, const vl_evt_t &rhs)
+                {
+                    return lhs.evt_stamp_ps > rhs.evt_stamp_ps;
+                }
+        };
+        
+        // Event list type
+        typedef std::priority_queue
+        <
+            vl_evt_t,
+            std::vector<vl_evt_t>,
+            vl_evt_compare
+        > vl_evt_list_t;
+        
+        const int      m_clockMax;      // Number of clocks
+        vluint64_t     m_maxStep_ps;    // Maximum simulation step (in ps)
+        vluint64_t     m_nextStamp_ps;  // Next time stamp (in ps)
+        vl_clk_list_t  m_clockList;     // Clocks list
+        vl_evt_t       m_event;         // Current event
+        vl_evt_list_t  m_eventList;     // Events list
 };
 
 #endif /* _CLOCK_GEN_H_ */
