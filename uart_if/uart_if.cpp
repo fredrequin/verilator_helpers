@@ -28,44 +28,47 @@
 #include "uart_if.h"
 #include <stdlib.h>
 #include <stdio.h>
+#include <limits.h>
 
 // Constructor
-UartIF::UartIF()
-{
+UartIF::UartIF() :
     // No UART connection
-    loop_back_sig  = 1;
-    prev_bclk      = 0;
-    prev_rx        = 1;
-    
+    m_loopBackSignal { (vluint8_t)1 },
+    m_prevBaudClk    { (vluint8_t)0 },
+    m_prevRxSignal   { (vluint8_t)1 },
     // Initialize time variables
-    baud_clk_per   = (vluint64_t)200000000000LL / UART_BAUD_DFT;
-    rx_timeout_val = (vluint32_t)10000000 / UART_BAUD_DFT;
-    rx_timeout_cnt = (vluint32_t)0;
-    rx_timeout     = false;
-    
+    m_baudClkPer     { (vluint64_t)200000000000UL / UART_BAUD_DFT },
+    m_rxTimeoutVal   {       (vluint32_t)10000000 / UART_BAUD_DFT },
+    m_rxTimeoutCtr   {                              (vluint32_t)0 },
+    m_rxTimeout      {                                      false },
     // Default UART configuration (8N1 @ 115200 bauds)
-    baud_rate      = UART_BAUD_DFT;
-    mode_9bit      = false;         // 8
-    parity         = PARITY_NONE;   // N
-    stop_bits      = STOP_MSK_8N1;  // 1
-    rx_bit_msk     = RXD_MSK_8N1;
-    data_msk       = DATA_MSK_8B;
-    tx_ib_dly      = 3;             // 3/5 bit delay
-    
+    m_baudRate       {     UART_BAUD_DFT },
+    m_9bitMode       {             false }, // 8
+    m_parity         {       PARITY_NONE }, // N
+    m_stopBits       {      STOP_MSK_8N1 }, // 1
+    m_rxBitMask      {       RXD_MSK_8N1 },
+    m_dataMask       {       DATA_MSK_8B },
+    m_txInterByte    {                 3 }, // 3/5 bit delay
     // TX state
-    tx_data        = TX_DATA_EMPTY;
-    tx_cycle       = -3;
-    tx_sig         = &loop_back_sig;
-    
+    m_txData         {     TX_DATA_EMPTY },
+    m_txCycle        {                -3 },
+    m_txSignal       { &m_loopBackSignal },
+    m_txeCback       {              NULL },
     // RX state
-    rx_data        = RX_DATA_EMPTY;
-    rx_cycle       = 0;
-    rx_sig         = &loop_back_sig;
+    m_rxData         {     RX_DATA_EMPTY },
+    m_rxCycle        {                 0 },
+    m_rxSignal       { &m_loopBackSignal },
+    m_rxfCback       {              NULL },
+    m_rxLevel        {           INT_MAX }
+{
 }
 
 // Destructor
 UartIF::~UartIF()
 {
+    // Flush the buffers
+    while (!m_rxBuffer.empty()) m_rxBuffer.pop();
+    while (!m_txBuffer.empty()) m_txBuffer.pop();
 }
 
 // Configure the UART
@@ -89,13 +92,13 @@ vluint64_t UartIF::SetUartConfig(const char *uart_cfg, vluint32_t baud, short in
     {
         printf("UART : bad configuration string !!\n");
         fflush(stdout);
-        return 0LL;
+        return 0UL;
     }
     if (baud < UART_BAUD_MIN)
     {
         printf("UART : baud rate too low !!\n");
         fflush(stdout);
-        return 0LL;
+        return 0UL;
     }
     
     // Stop bits config
@@ -107,116 +110,116 @@ vluint64_t UartIF::SetUartConfig(const char *uart_cfg, vluint32_t baud, short in
         {
             printf("UART : wrong number of stop bits !!\n");
             fflush(stdout);
-            return 0LL;
+            return 0UL;
         }
     }
     
     // Parity config
     switch (uart_cfg[1])
     {
-        case 'N' : parity = PARITY_NONE;               break;
-        case 'O' : parity = PARITY_ODD;  cfg_idx += 2; break;
-        case 'E' : parity = PARITY_EVEN; cfg_idx += 2; break;
+        case 'N' : m_parity = PARITY_NONE;               break;
+        case 'O' : m_parity = PARITY_ODD;  cfg_idx += 2; break;
+        case 'E' : m_parity = PARITY_EVEN; cfg_idx += 2; break;
         default  : 
         {
             printf("UART : invalid parity mode !!\n");
             fflush(stdout);
-            return 0LL;
+            return 0UL;
         }
     }
     
     // Data bits config
     switch (uart_cfg[0])
     {
-        case '8' : mode_9bit = false;               break;
-        case '9' : mode_9bit = true;  cfg_idx += 4; break;
+        case '8' : m_9bitMode = false;               break;
+        case '9' : m_9bitMode = true;  cfg_idx += 4; break;
         default  :
         {
             printf("UART : wrong number of data bits !!\n");
             fflush(stdout);
-            return 0LL;
+            return 0UL;
         }
     }
     
     // Stop bits mask
-    stop_bits    = c_stop_mask[cfg_idx];
+    m_stopBits    = c_stop_mask[cfg_idx];
     
     // Receive bit mask
-    rx_bit_msk   = c_rxd_mask[cfg_idx];
+    m_rxBitMask   = c_rxd_mask[cfg_idx];
     
     // Data bits mask
-    data_msk     = (mode_9bit) ? DATA_MSK_9B : DATA_MSK_8B;
+    m_dataMask     = (m_9bitMode) ? DATA_MSK_9B : DATA_MSK_8B;
     
     // Baud rate config
-    baud_rate    = baud;
+    m_baudRate    = baud;
     
     // Baud clock : 5x over-sampling
-    baud_clk_per = (vluint64_t)200000000000LL / baud;
+    m_baudClkPer = (vluint64_t)200000000000UL / baud;
     
     // Inter byte delay in bit clock cycles
-    tx_ib_dly    = inter_byte;
+    m_txInterByte    = inter_byte;
     
-    return baud_clk_per;
+    return m_baudClkPer;
 }
 
 // Set RX time-out
 void UartIF::SetRxTimeout(vluint32_t timeout_us)
 {
-    if (timeout_us < ((vluint32_t)1000000 / baud_rate))
+    if (timeout_us < ((vluint32_t)1000000 / m_baudRate))
     {
         printf("UART : RX timeout too low !!\n");
         fflush(stdout);
         return;
     }
     // Timeout delays (us -> cycles)
-    rx_timeout_val = (vluint32_t)(((vluint64_t)1000000LL * timeout_us) / baud_clk_per);
+    m_rxTimeoutVal = (vluint32_t)(((vluint64_t)1000000UL * timeout_us) / m_baudClkPer);
 }
 
 // Connect the UART TX to a signal
 void UartIF::ConnectTx(vluint8_t *sig)
 {
     // Store the signal's memory address
-    tx_sig = sig;
+    m_txSignal = sig;
     // Set TX in idle state
-    *tx_sig = 1;
+    *m_txSignal = (vluint8_t)1;
 }
 
 // Connect the UART RX to a signal
 void UartIF::ConnectRx(vluint8_t *sig)
 {
     // Store the signal's memory address
-    rx_sig = sig;
+    m_rxSignal     = sig;
     // We assume RX is in idle state
-    prev_rx = 1;
+    m_prevRxSignal = (vluint8_t)1;
 }
 
 // Write one data into the TX buffer
 void UartIF::PutTxChar(vluint16_t data)
 {
-    tx_buf.push(data & data_msk);
+    m_txBuffer.push(data & m_dataMask);
 }
 
 void UartIF::PutTxString(const char *str)
 {
-    while (*str) tx_buf.push((vluint16_t)*str++);
+    while (*str) m_txBuffer.push((vluint16_t)*str++);
 }
 
 // Check if RX buffer is empty
 bool UartIF::IsRxEmpty(void)
 {
-    return rx_buf.empty();
+    return m_rxBuffer.empty();
 }
 
 // Number of bytes in RX buffer
 int  UartIF::RxSize(void)
 {
-    return rx_buf.size();
+    return m_rxBuffer.size();
 }
 
 // Read one data from the RX buffer
 int  UartIF::GetRxChar(vluint16_t &data)
 {
-    if (rx_buf.empty())
+    if (m_rxBuffer.empty())
     {
         data = 0;
         return RX_EMPTY;
@@ -225,10 +228,10 @@ int  UartIF::GetRxChar(vluint16_t &data)
     {
         vluint16_t tmp;
         
-        tmp = rx_buf.front();
+        tmp = m_rxBuffer.front();
         //printf("%04X ", tmp);
-        rx_buf.pop();
-        data = tmp & data_msk;
+        m_rxBuffer.pop();
+        data = tmp & m_dataMask;
         
         if (tmp & RX_STOP_OK)
         {
@@ -255,166 +258,195 @@ int  UartIF::GetRxChar(vluint16_t &data)
     }
 }
 
+void UartIF::SetTXE_CallBack(void (*cback)())
+{
+    m_txeCback = cback;
+}
+
+void UartIF::SetRXF_CallBack(void (*cback)(), int level)
+{
+    if (cback)
+    {
+        m_rxfCback = cback;
+        m_rxLevel  = (level > 0) ? level : 1;
+    }
+    else
+    {
+        m_rxfCback = NULL;
+        m_rxLevel  = INT_MAX;
+    }
+}
+
 // Evaluate TX and RX channels
 void UartIF::Eval(vluint8_t bclk)
 {
     // Baud clock rising edge
-    if (bclk && !prev_bclk)
+    if (bclk && !m_prevBaudClk)
     {
         // TX is busy
-        if (tx_data)
+        if (m_txData)
         {
             // Every 5 cycles, shift one bit out
-            if (tx_cycle == 4)
+            if (m_txCycle == 4)
             {
                 // Least significant bit first
-                tx_data >>= 1;
-                if (tx_data)
+                m_txData >>= 1;
+                if (m_txData)
                 {
                     // Shift one bit out
-                    *tx_sig = tx_data & 1;
+                    *m_txSignal = m_txData & 1;
                     // Restart cycle counter
-                    tx_cycle = 0;
+                    m_txCycle = 0;
                 }
                 else
                 {
                     // Set inter byte delay
-                    tx_cycle = -tx_ib_dly;
+                    m_txCycle = -m_txInterByte;
+                    // TX buffer empty call-back
+                    if (m_txBuffer.empty() && (m_txeCback))
+                    {
+                        m_txeCback();
+                    }
                 }
             }
             else
             {
-                tx_cycle++;
+                m_txCycle++;
             }
         }
         // TX is idling
-        if (!tx_data)
+        if (!m_txData)
         {
             // Manage the inter-byte delay
-            if (tx_cycle < 0)
+            if (m_txCycle < 0)
             {
-                tx_cycle++;
+                m_txCycle++;
             }
             // Prepare a new character (if available)
             else
             {
-                if (!tx_buf.empty())
+                if (!m_txBuffer.empty())
                 {
                     // Get one byte from the buffer
-                    tx_data = tx_buf.front();
-                    tx_buf.pop();
+                    m_txData = m_txBuffer.front();
+                    m_txBuffer.pop();
                     // Add parity
-                    tx_data |= CalcParity(tx_data);
+                    m_txData |= CalcParity(m_txData);
                     // Add stop bits
-                    tx_data |= stop_bits;
+                    m_txData |= m_stopBits;
                     // Send START bit first
-                    tx_data <<= 1;
-                    *tx_sig = 0;
+                    m_txData <<= 1;
+                    *m_txSignal = 0;
                 }
             }
         }
         
         // Receive one character (one bit every 5 cycles)
-        if (rx_cycle)
+        if (m_rxCycle)
         {
             // Middle of the bit time : Shift one bit in
-            if (rx_cycle == 3)
+            if (m_rxCycle == 3)
             {
                 // By default, shift a one
-                rx_data = (rx_data >> 1) | (vluint16_t)0x8000;
+                m_rxData = (m_rxData >> 1) | (vluint16_t)0b1000000000000000;
                 // Shift a zero if RX pin = 0
-                if (*rx_sig == 0) rx_data &= rx_bit_msk;
+                if (*m_rxSignal == 0) m_rxData &= m_rxBitMask;
             }
             // Full byte received ?
-            if (rx_data & 1)
+            if (m_rxData & 1)
             {
                 // No, count cycles
-                rx_cycle = (rx_cycle == 5) ? 1 : rx_cycle + 1;
+                m_rxCycle = (m_rxCycle == 5) ? 1 : m_rxCycle + 1;
             }
             else
             {
                 vluint16_t tmp;
                 
                 // Yes, decode byte
-                rx_cycle = 0;
+                m_rxCycle = 0;
                 
                 // Drop START bit
-                rx_data >>= 1;
+                m_rxData >>= 1;
                 // Check parity bit
-                if (parity)
+                if (m_parity)
                 {
-                    tmp = (mode_9bit) ? rx_data & 0x200 : rx_data & 0x100;
-                    tmp = (tmp == CalcParity(rx_data)) ? RX_PARITY_OK : 0;
+                    tmp = (m_9bitMode) ? m_rxData & 0b1000000000 : m_rxData & 0b100000000;
+                    tmp = (tmp == CalcParity(m_rxData)) ? RX_PARITY_OK : 0;
                 }
                 else
                 {
                     tmp = RX_PARITY_OK;
                 }
                 // Check stop bits
-                if ((rx_data & stop_bits) == stop_bits) tmp |= RX_STOP_OK;
+                if ((m_rxData & m_stopBits) == m_stopBits) tmp |= RX_STOP_OK;
                 // Mark start of message
-                if (rx_timeout)
+                if (m_rxTimeout)
                 {
                     tmp |= RX_START;
-                    rx_timeout = false;
+                    m_rxTimeout = false;
                 }
                 // Extract data bits
-                tmp |= rx_data & data_msk;
+                tmp |= m_rxData & m_dataMask;
                 // Store result
-                rx_buf.push(tmp);
+                m_rxBuffer.push(tmp);
                 // Clear RX buffer
-                rx_data = RX_DATA_EMPTY;
+                m_rxData = RX_DATA_EMPTY;
+                // RX buffer full call-back
+                if (m_rxBuffer.size() >= m_rxLevel)
+                {
+                    m_rxfCback();
+                }
             }
         }
         // Wait for a new character
         else
         {
             // RX falling edge (START bit)
-            if (prev_rx && !(*rx_sig))
+            if (m_prevRxSignal && !(*m_rxSignal))
             {
                 // Clear the time-out counter
-                rx_timeout_cnt = 0;
+                m_rxTimeoutCtr = 0;
                 // Activate RX state machine
-                rx_cycle = 1;
+                m_rxCycle = 1;
             }
             else
             {
                 // Time-out counter management
-                if (!rx_timeout)
+                if (!m_rxTimeout)
                 {
-                    rx_timeout_cnt ++;
-                    rx_timeout = (rx_timeout_cnt >= rx_timeout_val);
+                    m_rxTimeoutCtr ++;
+                    m_rxTimeout = (m_rxTimeoutCtr >= m_rxTimeoutVal);
                 }
             }
         }
         // Previous RX value
-        prev_rx = *rx_sig;
+        m_prevRxSignal = *m_rxSignal;
     }
     // Previous baud clock value
-    prev_bclk = bclk;
+    m_prevBaudClk = bclk;
 }
 
 // Compute even/odd parity on an 8/9-bit data
 vluint16_t UartIF::CalcParity(vluint16_t data)
 {
-    vluint16_t tmp = 0x0000;
+    vluint16_t tmp = (vluint16_t)0;
 
     // No parity case
-    if (parity == PARITY_NONE) return tmp;
+    if (m_parity == PARITY_NONE) return tmp;
     
     // ({ data[7:0], 1'b0 } ^ { data[6:0], 2'b0 }) & 9'b101010100
-    tmp = ((data << 1) ^ (data << 2)) & 0x154;
+    tmp = ((data << 1) ^ (data << 2)) & 0b101010100;
     // (tmp[8:0] ^ { data[6:0], 2'b0 }) & 9'b100010000
-    tmp = (tmp ^ (tmp << 2)) & 0x110;
+    tmp = (tmp ^ (tmp << 2)) & 0b100010000;
     // (tmp[8:0] ^ { data[4:0], 4'b0 }) & 9'b100000000
-    tmp = (tmp ^ (tmp << 4)) & 0x100;
+    tmp = (tmp ^ (tmp << 4)) & 0b100000000;
 
     // Odd parity case
-    if (parity == PARITY_ODD) tmp ^= 0x100;
+    if (m_parity == PARITY_ODD) tmp ^= 0b100000000;
     
     // 9-bit case
-    if (mode_9bit)
-        return (tmp ^ (data & 0x100)) << 1;
+    if (m_9bitMode)
+        return (tmp ^ (data & 0b100000000)) << 1;
     // 8-bit case
     else
         return tmp;
