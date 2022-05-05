@@ -51,10 +51,11 @@ class UartIF
         void        ConnectRx(vluint8_t *sig);
         void        PutTxChar(vluint16_t data);
         void        PutTxString(const char *str);
-        bool        IsRxEmpty(void);
-        int         RxSize(void);
+        inline bool IsRxEmpty(void) { return m_rxBuffer.empty(); }
+        inline int  RxSize(void)    { return m_rxBuffer.size(); }
         int         GetRxChar(vluint16_t &data);
         void        SetTXE_CallBack(void (*cback)());
+        void        SetRXT_CallBack(void (*cback)());
         void        SetRXF_CallBack(void (*cback)(), int level);
     private:
         // Private methods
@@ -136,9 +137,11 @@ class UartIF
         void      (*m_rxfCback)();
         // Uart RX full level
         int         m_rxLevel;
+        // Uart RX time-out call-back
+        void      (*m_rxtoCback)();
         // RX time-out management
-        vluint32_t  m_rxTimeoutVal;  // RX timeout value (in cycles)
-        vluint32_t  m_rxTimeoutCtr;  // RX timeout counter (in cycles)
+        vluint32_t  m_rxTimeoutVal;  // RX timeout value (in UART clock cycles)
+        vluint32_t  m_rxTimeoutCtr;  // RX timeout counter (in UART clock cycles)
         bool        m_rxTimeout;
         // UART internal loopback signal
         vluint8_t   m_loopBackSignal;

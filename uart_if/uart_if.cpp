@@ -148,16 +148,16 @@ vluint64_t UartIF::SetUartConfig(const char *uart_cfg, vluint32_t baud, short in
     m_rxBitMask   = c_rxd_mask[cfg_idx];
     
     // Data bits mask
-    m_dataMask     = (m_9bitMode) ? DATA_MSK_9B : DATA_MSK_8B;
+    m_dataMask    = (m_9bitMode) ? DATA_MSK_9B : DATA_MSK_8B;
     
     // Baud rate config
     m_baudRate    = baud;
     
     // Baud clock : 5x over-sampling
-    m_baudClkPer = (vluint64_t)200000000000UL / baud;
+    m_baudClkPer  = (vluint64_t)200000000000UL / baud;
     
     // Inter byte delay in bit clock cycles
-    m_txInterByte    = inter_byte;
+    m_txInterByte = inter_byte;
     
     return m_baudClkPer;
 }
@@ -173,6 +173,8 @@ void UartIF::SetRxTimeout(vluint32_t timeout_us)
     }
     // Timeout delays (us -> cycles)
     m_rxTimeoutVal = (vluint32_t)(((vluint64_t)1000000UL * timeout_us) / m_baudClkPer);
+    m_rxTimeoutCtr = (vluint32_t)0;
+    m_rxTimeout    = false;
 }
 
 // Connect the UART TX to a signal
@@ -202,18 +204,6 @@ void UartIF::PutTxChar(vluint16_t data)
 void UartIF::PutTxString(const char *str)
 {
     while (*str) m_txBuffer.push((vluint16_t)*str++);
-}
-
-// Check if RX buffer is empty
-bool UartIF::IsRxEmpty(void)
-{
-    return m_rxBuffer.empty();
-}
-
-// Number of bytes in RX buffer
-int  UartIF::RxSize(void)
-{
-    return m_rxBuffer.size();
 }
 
 // Read one data from the RX buffer
@@ -261,6 +251,13 @@ int  UartIF::GetRxChar(vluint16_t &data)
 void UartIF::SetTXE_CallBack(void (*cback)())
 {
     m_txeCback = cback;
+}
+
+void UartIF::SetRXT_CallBack(void (*cback)())
+{
+    m_rxtoCback    = cback;
+    m_rxTimeoutCtr = (vluint32_t)0;
+    m_rxTimeout    = false;
 }
 
 void UartIF::SetRXF_CallBack(void (*cback)(), int level)
@@ -416,6 +413,11 @@ void UartIF::Eval(vluint8_t bclk)
                 {
                     m_rxTimeoutCtr ++;
                     m_rxTimeout = (m_rxTimeoutCtr >= m_rxTimeoutVal);
+                    // Time-out call-back for error management
+                    if (m_rxTimeout && (m_rxtoCback))
+                    {
+                        m_rxtoCback();
+                    }
                 }
             }
         }
