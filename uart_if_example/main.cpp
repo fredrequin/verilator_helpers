@@ -1,5 +1,10 @@
-#include "Vuart_delay.h"
-#include "verilated.h"
+// Macros to build include file name
+#define _quoted_string(x) #x
+#define _symbols_header(x) _quoted_string(x##__Syms.h)
+#define symbols_header(x) _symbols_header(x)
+// Top level
+#include symbols_header(VM_PREFIX)
+// Helpers
 #include "../clock_gen/clock_gen.h"
 #include "../uart_if/uart_if.h"
 
@@ -75,10 +80,10 @@ int main(int argc, char **argv, char **env)
     }
     
     // Initialize top verilog instance
-    Vuart_delay* top = new Vuart_delay;
+    VM_PREFIX* top = new VM_PREFIX;
     
     // Initialize clock generator    
-    clk = new ClockGen(1, 256);
+    clk = new ClockGen(1);
     tb_time = (vluint64_t)0;
     // Initialize UART interface
     ser = new UartIF();
@@ -101,7 +106,7 @@ int main(int argc, char **argv, char **env)
     tfp->spTrace()->set_time_resolution ("1 ps");
     if (trc_idx == min_idx)
     {
-        sprintf(file_name, "uart_%04d.vcd", trc_idx);
+        sprintf(file_name, _quoted_string(VM_PREFIX) "_%04d.vcd", trc_idx);
         printf("Opening VCD file \"%s\"\n", file_name);
         tfp->open (file_name);
     }
