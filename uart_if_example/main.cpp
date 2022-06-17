@@ -1,5 +1,6 @@
 // Macros to build include file name
 #define _quoted_string(x) #x
+#define quoted_string(x) _quoted_string(x)
 #define _symbols_header(x) _quoted_string(x##__Syms.h)
 #define symbols_header(x) _symbols_header(x)
 // Top level
@@ -106,7 +107,7 @@ int main(int argc, char **argv, char **env)
     tfp->spTrace()->set_time_resolution ("1 ps");
     if (trc_idx == min_idx)
     {
-        sprintf(file_name, _quoted_string(VM_PREFIX) "_%04d.vcd", trc_idx);
+        sprintf(file_name, quoted_string(VM_PREFIX) "_%04d.vcd", trc_idx);
         printf("Opening VCD file \"%s\"\n", file_name);
         tfp->open (file_name);
     }

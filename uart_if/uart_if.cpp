@@ -58,6 +58,7 @@ UartIF::UartIF() :
     m_rxData         {     RX_DATA_EMPTY },
     m_rxCycle        {                 0 },
     m_rxSignal       { &m_loopBackSignal },
+    m_rxtoCback      {              NULL },
     m_rxfCback       {              NULL },
     m_rxLevel        {           INT_MAX }
 {
