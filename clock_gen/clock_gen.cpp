@@ -273,7 +273,7 @@ void ClockGen::AdvanceClocks(vluint64_t &stamp_ps, bool quiet)
     // Show progress, in microseconds
     if (!(vluint16_t)stamp_ps)
     {
-        printf("\r%ld us", stamp_ps / 1000000 );
+        printf("%ld us\r", stamp_ps / 1000000 );
         fflush(stdout);
     }
 }
