@@ -37,6 +37,19 @@
 #define RX_PARITY_ERR  (-2)
 #define RX_FRAMING_ERR (-3)
 
+#define TX_ERR_INJ_DATA0  ((vluint16_t)1 << 12)
+#define TX_ERR_INJ_DATA1  ((vluint16_t)2 << 12)
+#define TX_ERR_INJ_DATA2  ((vluint16_t)3 << 12)
+#define TX_ERR_INJ_DATA3  ((vluint16_t)4 << 12)
+#define TX_ERR_INJ_DATA4  ((vluint16_t)5 << 12)
+#define TX_ERR_INJ_DATA5  ((vluint16_t)6 << 12)
+#define TX_ERR_INJ_DATA6  ((vluint16_t)7 << 12)
+#define TX_ERR_INJ_DATA7  ((vluint16_t)8 << 12)
+#define TX_ERR_INJ_DATA8  ((vluint16_t)9 << 12)
+#define TX_ERR_INJ_START  ((vluint16_t)10 << 12)
+#define TX_ERR_INJ_STOP   ((vluint16_t)11 << 12)
+#define TX_ERR_INJ_PARITY ((vluint16_t)12 << 12)
+
 class UartIF
 {
     public:
@@ -60,6 +73,7 @@ class UartIF
     private:
         // Private methods
         vluint16_t  CalcParity(vluint16_t data);
+        vluint16_t  CalcErrMask(vluint16_t data);
         // Parity configuration
         enum par_cfg_t
         {
@@ -119,6 +133,8 @@ class UartIF
         short       m_txCycle;
         // Data being transmitted
         vluint16_t  m_txData;
+        // Error injected during transmit
+        vluint16_t  m_txError;
         // Current receive state
         short       m_rxCycle;
         // Data being received

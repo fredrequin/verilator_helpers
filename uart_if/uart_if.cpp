@@ -51,6 +51,7 @@ UartIF::UartIF() :
     m_txInterByte    {                 3 }, // 3/5 bit delay
     // TX state
     m_txData         {     TX_DATA_EMPTY },
+    m_txError        {     TX_DATA_EMPTY },
     m_txCycle        {                -3 },
     m_txSignal       { &m_loopBackSignal },
     m_txeCback       {              NULL },
@@ -199,7 +200,7 @@ void UartIF::ConnectRx(vluint8_t *sig)
 // Write one data into the TX buffer
 void UartIF::PutTxChar(vluint16_t data)
 {
-    m_txBuffer.push(data & m_dataMask);
+    m_txBuffer.push(data);
 }
 
 void UartIF::PutTxString(const char *str)
@@ -288,11 +289,12 @@ void UartIF::Eval(vluint8_t bclk)
             if (m_txCycle == 4)
             {
                 // Least significant bit first
-                m_txData >>= 1;
+                m_txData  >>= 1;
+                m_txError >>= 1;
                 if (m_txData)
                 {
                     // Shift one bit out
-                    *m_txSignal = m_txData & 1;
+                    *m_txSignal = (m_txData ^ m_txError) & 1;
                     // Restart cycle counter
                     m_txCycle = 0;
                 }
@@ -328,13 +330,16 @@ void UartIF::Eval(vluint8_t bclk)
                     // Get one byte from the buffer
                     m_txData = m_txBuffer.front();
                     m_txBuffer.pop();
+                    // Error injection
+                    m_txError = CalcErrMask(m_txData);
                     // Add parity
+                    m_txData &= m_dataMask;
                     m_txData |= CalcParity(m_txData);
                     // Add stop bits
                     m_txData |= m_stopBits;
                     // Send START bit first
                     m_txData <<= 1;
-                    *m_txSignal = 0;
+                    *m_txSignal = m_txError & 1;
                 }
             }
         }
@@ -453,4 +458,39 @@ vluint16_t UartIF::CalcParity(vluint16_t data)
     // 8-bit case
     else
         return tmp;
+}
+
+// Compute error mask for error injection
+vluint16_t UartIF::CalcErrMask(vluint16_t data)
+{
+    data >>= 12;
+    
+    switch (data)
+    {
+        // Data bits #0 - 7
+        case 1:
+        case 2:
+        case 3:
+        case 4:
+        case 5:
+        case 6:
+        case 7:
+        case 8:
+            return (vluint16_t)1 << data;
+        // Data bit #8
+        case 9:
+            return (m_9bitMode) ? (vluint16_t)1 << 9 : (vluint16_t)0;
+        // START bit
+        case 10:
+            return (vluint16_t)1;
+        // STOP bit
+        case 11:
+            return m_stopBits << 1;
+        // Parity bit
+        case 12:
+            return (m_parity == PARITY_NONE) ? (vluint16_t)0 :
+                   (m_9bitMode) ? (vluint16_t)1 << 10 : (vluint16_t)1 << 9;
+        default:
+            return (vluint16_t)0;
+    }
 }
