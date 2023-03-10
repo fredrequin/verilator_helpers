@@ -39,8 +39,6 @@ template<typename T> class RingBuf
         // Destructor
         ~RingBuf()
         {
-            m_size = 0;
-            m_index.both = 0ULL;
             delete [] m_array;
         }
         // Flush FIFO
@@ -54,7 +52,7 @@ template<typename T> class RingBuf
             register index_t i;
             i.both = m_index.both;
 
-            return (i.idx[1] == i.idx[0]);
+            return (i.idx[RD_PTR] == i.idx[WR_PTR]);
         }
         // Is FIFO full ?
         inline bool is_full(void)
@@ -62,7 +60,7 @@ template<typename T> class RingBuf
             register index_t i;
             i.both = m_index.both;
 
-            return ((i.idx[1] + m_size) == i.idx[0]);
+            return ((i.idx[RD_PTR] + m_size) == i.idx[WR_PTR]);
         }
         // FIFO fullness
         inline vluint32_t level(void)
@@ -70,7 +68,7 @@ template<typename T> class RingBuf
             register index_t i;
             i.both = m_index.both;
 
-            return (i.idx[1] - i.idx[0]);
+            return (i.idx[WR_PTR] - i.idx[RD_PTR]);
         }
         // Write an element to the FIFO
         bool write(const T data)
@@ -78,14 +76,14 @@ template<typename T> class RingBuf
             register index_t i;
             i.both = m_index.both;
             
-            if ((i.idx[1] + m_size) == i.idx[0])
+            if ((i.idx[RD_PTR] + m_size) == i.idx[WR_PTR])
             {
                 return false;
             }
             else
             {
-                m_array[i.idx[0] & (m_size - 1)] = data;
-                m_index.idx[0] = i.idx[0] + 1;
+                m_array[i.idx[WR_PTR] & (m_size - 1)] = data;
+                m_index.idx[WR_PTR] = i.idx[WR_PTR] + 1;
                 return true;
             }
         }
@@ -95,15 +93,15 @@ template<typename T> class RingBuf
             register index_t i;
             i.both = m_index.both;
             
-            data = m_array[i.idx[1] & (m_size - 1)];
+            data = m_array[i.idx[RD_PTR] & (m_size - 1)];
             
-            if (i.idx[1] == i.idx[0])
+            if (i.idx[RD_PTR] == i.idx[WR_PTR])
             {
                 return false;
             }
             else
             {
-                m_index.idx[1] = i.idx[1] + 1;
+                m_index.idx[RD_PTR] = i.idx[RD_PTR] + 1;
                 return true;
             }
         }
@@ -113,8 +111,10 @@ template<typename T> class RingBuf
             vluint64_t both;
             vluint32_t idx[2]; // 0 : write index, 1 : read index
         } index_t;
-        T               *m_array;
+        const int        WR_PTR = 0;
+        const int        RD_PTR = 1;
         const vluint32_t m_size;
+        T               *m_array;
         index_t          m_index;
 };
 
